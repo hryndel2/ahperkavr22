@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta content="width=device-width, initial-scale=1" name="viewport" />
+  <title>Capture UI with Fullscreen 3D Model</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"
+    rel="stylesheet"
+  />
+  <!-- Добавляем Three.js, GLTFLoader и OrbitControls для управления моделью -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <style>
+    body,
+    html {
+      margin: 0;
+      height: 100%;
+      background-color: rgb(231,231,231);
+      overflow: hidden; /* Скрываем прокрутку, так как контент фиксирован */
+    }
+    /* Стили для кнопок с эффектом размытия */
+    .btn-blur {
+      background-color: rgba(128, 128, 128, 0.3); /* Полупрозрачный серый фон */
+      backdrop-filter: blur(10px); /* Эффект размытия фона */
+      -webkit-backdrop-filter: blur(10px); /* Для Safari */
+      border-radius: 9999px; /* Полностью закругленные углы */
+      color: white; /* Белый текст */
+      transition: background-color 0.3s ease, transform 0.2s ease; /* Плавный переход для фона и трансформации */
+      z-index: 10; /* Поверх других элементов */
+      cursor: pointer; /* Курсор-указатель */
+      border: none; /* Убираем границу */
+    }
+    /* Эффект при наведении/фокусе на кнопки с размытием */
+    .btn-blur:hover,
+    .btn-blur:focus {
+      background-color: rgba(128, 128, 128, 0.5); /* Более темный полупрозрачный фон */
+      outline: none; /* Убираем обводку при фокусе */
+      transform: scale(1.05); /* Немного увеличиваем кнопку */
+    }
+    /* Стили для поля ввода */
+    input::placeholder {
+      color: rgba(255, 255, 255, 0.6); /* Цвет плейсхолдера */
+    }
+    input.btn-blur:hover,
+    input.btn-blur:focus {
+      background-color: rgba(128, 128, 128, 0.4); /* Немного темнее при наведении/фокусе */
+      transform: none; /* Отключаем увеличение для поля ввода */
+    }
+
+    /* Контейнер для UI элементов */
+    .ui-container {
+      position: relative;
+      z-index: 10;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      justify-content: space-between; /* Распределяем элементы по вертикали */
+      pointer-events: none; /* Позволяет кликать сквозь контейнер, если нет интерактивных элементов */
+    }
+    .ui-container > * {
+        pointer-events: auto; /* Включаем клики для дочерних интерактивных элементов */
+    }
+
+    /* Стили для кнопок управления (звонок, динамик, микрофон) */
+    .control-btn {
+      cursor: pointer;
+      transition: transform 0.2s ease, background-color 0.3s ease; /* Плавный переход */
+      display: flex; /* Для центрирования иконки */
+      justify-content: center;
+      align-items: center;
+    }
+    .control-btn:hover {
+      transform: scale(1.1); /* Увеличение при наведении */
+    }
+    .control-btn.active {
+      background-color: rgba(255, 255, 255, 0.5); /* Активное состояние */
+    }
+
+    /* Стили для кнопки "Send" */
+    #send-btn {
+      background-color: white;
+      color: black;
+      transition: background-color 0.3s ease, transform 0.2s ease, color 0.3s ease;
+      border: none;
+    }
+    #send-btn:hover {
+      background-color: rgb(200, 200, 200); /* Более темный серый при наведении */
+      color: rgb(50, 50, 50); /* Темнее текст */
+      transform: scale(1.05); /* Немного увеличиваем */
+    }
+
+    /* Стили для контейнера 3D модели (будет фоном) */
+    #model-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 0; /* Находится под UI элементами */
+      background-color: rgb(231, 231, 231); /* Цвет фона, если модель не загружена */
+    }
+
+    /* Стили для загрузчика */
+    #loader {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgb(231, 231, 231);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000; /* Поверх всего */
+      color: #333; /* Цвет текста загрузчика */
+      font-size: 1.2rem;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-[rgb(231,231,231)]">
+  <!-- Контейнер для всех UI элементов -->
+  <div class="ui-container">
+    <!-- Верхняя часть UI: кнопки меню и захвата -->
+    <div class="flex justify-between items-center mb-4">
+      <button aria-label="Menu" class="btn-blur text-3xl leading-none px-4 py-2">
+        <i class="fas fa-bars"></i>
+      </button>
+      <button
+        aria-label="Capture"
+        class="btn-blur flex items-center gap-2 px-4 py-2 text-white text-sm font-semibold"
+      >
+        <i class="fas fa-qrcode text-lg"></i> Capture
+      </button>
+    </div>
+
+    <!-- Загрузчик (показывается во время загрузки модели) -->
+    <div id="loader">
+      <p>Загрузка модели...</p>
+    </div>
+
+    <!-- Нижняя часть UI: кнопки управления, поле ввода и кнопка отправки -->
+    <div class="space-y-4">
+      <!-- Кнопки управления (звонок, динамик, микрофон) -->
+      <div class="flex justify-between gap-4 mb-4">
+        <button id="call-btn" class="btn-blur flex-1 py-3 text-white text-xl control-btn">
+          <i class="fas fa-phone"></i> <!-- Иконка телефона для звонка -->
+        </button>
+        <button id="speaker-btn" class="btn-blur flex-1 py-3 text-white text-xl control-btn">
+          <i class="fas fa-volume-up"></i> <!-- Иконка динамика -->
+        </button>
+        <button id="mic-btn" class="btn-blur flex-1 py-3 text-white text-xl control-btn">
+          <i class="fas fa-microphone"></i> <!-- Иконка микрофона -->
+        </button>
+      </div>
+      <!-- Поле ввода и кнопка отправки -->
+      <div class="flex justify-between items-center gap-4">
+        <input
+          id="user-input"
+          type="text"
+          placeholder="Ask Anything"
+          class="flex-1 btn-blur py-3 px-4 text-white text-sm font-light outline-none rounded-full"
+          autocomplete="off"
+        />
+        <button
+          id="send-btn"
+          aria-label="Send"
+          class="flex items-center gap-2 bg-white text-black rounded-full py-3 px-6 text-base font-semibold"
+        >
+          Send
+        </button>
+      </div>
+      <!-- Область для отображения ответа -->
+      <div id="response-text" class="mt-4 text-white text-lg min-h-[3rem] text-center">
+        <!-- Здесь будет отображаться текст ответа -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Контейнер для 3D модели (будет фоном) -->
+  <div id="model-container">
+    <!-- Здесь будет отображаться 3D модель -->
+  </div>
+
+  <!-- Скрипт для загрузки и отображения glTF модели -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Инициализация Three.js
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); // alpha: true для прозрачности
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setClearColor(0xe7e7e7, 1); // Фон рендерера совпадает с фоном страницы
+      document.getElementById('model-container').appendChild(renderer.domElement);
+
+      // Добавляем освещение для лучшей видимости модели
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+      scene.add(ambientLight);
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+      directionalLight.position.set(0, 1, 1);
+      scene.add(directionalLight);
+
+      // Устанавливаем позицию камеры ближе к модели (было 5, теперь 2 для приближения)
+      camera.position.set(0, 0, 1);
+
+      // Инициализация OrbitControls для вращения модели по горизонтали (зажимая и двигая мышью)
+      const controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 0, 0); // Цель - центр модели
+      controls.enableZoom = false; // Отключаем зум (приближение/отдаление)
+      controls.enablePan = false; // Отключаем панорамирование (движение по плоскости)
+      controls.enableRotate = true; // Включаем только вращение
+      controls.minPolarAngle = Math.PI / 2; // Ограничиваем вертикальное вращение (только горизонтальное)
+      controls.maxPolarAngle = Math.PI / 2;
+
+      // Загрузчик glTF
+      const loader = new THREE.GLTFLoader();
+
+      // Показываем загрузчик
+      const loaderElement = document.getElementById('loader');
+      loaderElement.style.display = 'flex';
+
+      // Загружаем модель (замени 'avatar.gltf' на путь к твоей модели)
+      loader.load(
+        'models/scene.gltf', // Путь к файлу glTF (размести в той же папке или укажи полный URL)
+        (gltf) => {
+          const model = gltf.scene;
+          // Центрируем модель
+          model.position.set(0, -1.2, 0);
+          // Масштабируем, если нужно (по умолчанию 1)
+          model.scale.set(1, 1, 1);
+          scene.add(model);
+
+          // Если модель имеет анимации, играем первую
+          if (gltf.animations && gltf.animations.length > 0) {
+            const mixer = new THREE.AnimationMixer(model);
+            const action = mixer.clipAction(gltf.animations[0]);
+            action.play();
+
+            // Функция для обновления анимации
+            const animate = () => {
+              requestAnimationFrame(animate);
+              mixer.update(0.016); // Примерно 60 FPS
+              controls.update(); // Обновляем контролы
+              renderer.render(scene, camera);
+            };
+            animate();
+          } else {
+            // Если нет анимаций, просто рендерим сцену
+            const animate = () => {
+              requestAnimationFrame(animate);
+              controls.update(); // Обновляем контролы
+              renderer.render(scene, camera);
+            };
+            animate();
+          }
+
+          // Скрываем загрузчик после загрузки
+          loaderElement.style.display = 'none';
+        },
+        (progress) => {
+          // Опционально: обновляем прогресс загрузки
+          console.log('Прогресс: ' + (progress.loaded / progress.total * 100) + '%');
+        },
+        (error) => {
+          console.error('Ошибка загрузки модели:', error);
+          loaderElement.innerHTML = '<p>Ошибка загрузки модели. Проверь путь к файлу.</p>';
+        }
+      );
+
+      // Обработка изменения размера окна
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      // Логика для кнопок управления (из твоего кода)
+      const controlButtons = document.querySelectorAll('.control-btn');
+      controlButtons.forEach(button => {
+        button.addEventListener('click', () => {
+          controlButtons.forEach(btn => btn.classList.remove('active'));
+          button.classList.add('active');
+        });
+      });
+      document.getElementById('speaker-btn').classList.add('active');
+    });
+  </script>
+</body>
+</html>
